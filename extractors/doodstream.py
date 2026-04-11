@@ -3,10 +3,12 @@ import random
 import re
 import time
 import string
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from aiohttp_socks import ProxyConnector
 from playwright.async_api import async_playwright
+
+from config import CF_WORKER_URL
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,12 @@ class ExtractorError(Exception):
 class DoodStreamExtractor:
     """DoodStream URL extractor."""
 
-    def __init__(self, request_headers: dict, proxies: list = None):
+    def __init__(
+        self,
+        request_headers: dict,
+        proxies: list = None,
+        worker_url: str | None = None,
+    ):
         self.request_headers = request_headers
         self.base_headers = {
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -25,6 +32,7 @@ class DoodStreamExtractor:
         self.mediaflow_endpoint = "proxy_stream_endpoint"
         self.proxies = proxies or []
         self.base_url = "https://d000d.com"
+        self.worker_url = (worker_url or CF_WORKER_URL or "").strip()
 
     def _get_random_proxy(self):
         return random.choice(self.proxies) if self.proxies else None
@@ -47,6 +55,32 @@ class DoodStreamExtractor:
                 token = path_parts[-1]
 
         return pass_path, token
+
+    def _build_worker_url(self, target_url: str) -> str:
+        base_worker_url = self.worker_url.rstrip("/")
+        separator = "&" if "?" in base_worker_url else "?"
+        return f"{base_worker_url}{separator}{urlencode({'url': target_url})}"
+
+    def _build_fetch_url(self, target_url: str) -> str:
+        if self.worker_url:
+            worker_fetch_url = self._build_worker_url(target_url)
+            logger.info(
+                "DoodStream using CF_WORKER_URL for upstream fetch: worker=%s target=%s",
+                self.worker_url,
+                target_url,
+            )
+            return worker_fetch_url
+        return target_url
+
+    def _build_fetch_headers(self, extra_headers: dict | None = None) -> dict:
+        headers = {"User-Agent": self.base_headers["user-agent"]}
+        if self.worker_url:
+            headers["X-EasyProxy-Target-Host"] = urlparse(
+                extra_headers.get("referer") if extra_headers and extra_headers.get("referer") else ""
+            ).netloc or "doodstream"
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
 
     async def _fetch_player_data_via_browser(
         self, url: str
@@ -128,8 +162,9 @@ class DoodStreamExtractor:
     async def extract(self, url: str, **kwargs) -> dict:
         """Extract DoodStream URL."""
         session = await self._get_session()
-        
-        async with session.get(url) as response:
+
+        source_url = self._build_fetch_url(url)
+        async with session.get(source_url, headers=self._build_fetch_headers()) as response:
             text = await response.text()
             response_url = str(response.url)
 
@@ -159,7 +194,11 @@ class DoodStreamExtractor:
 
         response_text = pass_body
         if response_text is None:
-            async with session.get(pass_url, headers=headers) as response:
+            pass_fetch_url = self._build_fetch_url(pass_url)
+            async with session.get(
+                pass_fetch_url,
+                headers=self._build_fetch_headers(headers),
+            ) as response:
                 response_text = await response.text()
         
         timestamp_ms = str(int(time.time() * 1000))
