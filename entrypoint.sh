@@ -1,4 +1,5 @@
 #!/bin/bash
+export PYTHONPATH=/app
 
 # Start FlareSolverr in the background
 echo "🚀 Starting FlareSolverr (v3 Python)..."

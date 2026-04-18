@@ -37,7 +37,14 @@ RUN apt-get update && apt-get install -y \
     libglu1-mesa \
     ca-certificates \
     fonts-liberation \
+    chromium-driver \
     && rm -rf /var/lib/apt/lists/*
+
+# 3. Environment Settings
+ENV PYTHONPATH=/app
+ENV CHROME_EXE_PATH=/usr/bin/chromium
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROME_DRIVER_PATH=/usr/bin/chromedriver
 
 # 3. FlareSolverr v3 (Python)
 RUN git clone https://github.com/FlareSolverr/FlareSolverr.git /app/flaresolverr \
